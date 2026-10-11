@@ -1,0 +1,8 @@
+.env
+env.prod.yaml
+.venv/
+__pycache__/
+backend/data/
+node_modules/
+frontend/dist/
+.firebase/
