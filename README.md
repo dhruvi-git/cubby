@@ -1,103 +1,368 @@
-# Cubby: your private document vault
+# 🐻 Cubby — Multi-Cloud Personal Data Vault & AI Assistant
 
-Upload your important documents, search them by meaning, chat with them (every answer cites the exact page), and get reminded before anything expires. Built across three clouds so that **no single cloud ever holds both your files and the key to read them.**
+[![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)](docs/UPGRADE_v1.3.md)
+[![FastAPI](https://img.shields.io/badge/Backend-FastAPI%20%7C%20SQLAlchemy%20%7C%20pgvector-009688.svg)](https://fastapi.tiangolo.com/)
+[![Frontend](https://img.shields.io/badge/Frontend-React%2018%20%7C%20Vite%20%7C%20Tailwind%20v4%20%7C%20TS-61DAFB.svg)](https://react.dev/)
+[![Security](https://img.shields.io/badge/Security-AES--256--GCM%20Envelope%20Encryption%20%7C%20TOTP%202FA-red.svg)](#security-architecture)
+[![Clouds](https://img.shields.io/badge/Multi--Cloud-AWS%20%7C%20Azure%20%7C%20Google%20Cloud%20%7C%20Groq-orange.svg)](#multi-cloud-architecture)
 
-**New here? Open [`docs/SETUP_GUIDE.md`](docs/SETUP_GUIDE.md) and follow it from Part 0.** It walks through everything click by click.
+> **Store critical personal documents with cryptographic certainty that no single cloud provider ever possesses both your encrypted files and the keys to decrypt them.** Search by semantic meaning, chat with citations that highlight exact passages on source pages, automate expiry alerts, and securely collaborate with your household via encrypted Family Vaults.
 
-**Upgrading?** From v1.1 follow [`docs/UPGRADE_v1.2.md`](docs/UPGRADE_v1.2.md). From v1.0, do [`UPGRADE_v1.1.md`](docs/UPGRADE_v1.1.md) first.
+---
 
-## Features
+## 📑 Table of Contents
 
-- **Vault:** encrypted uploads, OCR for scans, automatic shelves, important dates, stars, sorting and bulk actions, duplicate detection
-- **ID cards:** passports, Aadhaar, PAN, driving licences and voter IDs recognised; numbers checked with official checksums, masked, and revealed only after a password check; old versions detected
-- **Ask:** search by meaning, streaming chat with page citations that open the in-app viewer with the passage highlighted, plus a floating chat on every page
-- **Privacy shield:** sensitive numbers are masked before any text reaches the AI
-- **Studio:** notes, AI reports with citations, exact data reports, a printable vault infographic
-- **Family vaults:** a private group chat per household: share documents as cards (each family has its own encryption key and copy), request documents with one-tap cards, ask @Cubby about the family's shared documents, shared reminders for everyone
-- **Password vault:** zero-knowledge (encrypted in the browser), generator, health and breach check
-- **Sharing:** time-limited, view-limited, revocable links with a public viewer page
-- **Reminders:** in-app and email digests before expiries and renewals
-- **Account safety:** mandatory 2FA, recovery codes, password reset, device list, security emails, auto-lock
+- [Overview](#overview)
+- [Key Features](#-key-features)
+  - [Personal Vault & Semantic RAG](#1-personal-vault--semantic-rag)
+  - [Family Vaults (New in v1.3)](#2-family-vaults-new-in-v13)
+  - [Zero-Knowledge Password Vault](#3-zero-knowledge-password-vault)
+  - [ID Shield & Checksum Verification](#4-id-shield--checksum-verification)
+  - [Studio & Automated Reporting](#5-studio--automated-reporting)
+  - [Enterprise-Grade Security](#6-enterprise-grade-security)
+- [Multi-Cloud Architecture](#-multi-cloud-architecture)
+  - [Division of Responsibilities](#division-of-responsibilities)
+  - [Cryptographic Envelope Encryption Flow](#cryptographic-envelope-encryption-flow)
+- [Tech Stack](#-tech-stack)
+- [Repository Structure](#-repository-structure)
+- [Quick Start (Local Development)](#-quick-start-local-development)
+  - [Prerequisites](#prerequisites)
+  - [1. Clone & Configure](#1-clone--configure)
+  - [2. Start Database & Backend](#2-start-database--backend)
+  - [3. Start Frontend](#3-start-frontend)
+- [Configuration Reference (.env)](#-configuration-reference-env)
+- [Production Deployment](#-production-deployment)
+- [Upgrade Guide](#-upgrade-guide)
+- [Known Limitations & Roadmap](#-known-limitations--roadmap)
+- [License](#-license)
 
-## What each cloud does
+---
 
-| Cloud | Services | Job |
-|---|---|---|
-| AWS | S3, Textract | Stores encrypted files, reads scanned documents (OCR) |
-| Azure | Key Vault, Blob Storage, Communication Services | Holds the master key, keeps a backup copy of files, sends account emails |
-| Google Cloud | Agent Platform (Gemini), Cloud Run, Cloud SQL, Cloud Scheduler | AI answers and search, runs the backend, database, daily reminders |
-| Groq | `gpt-oss-120b` | Backup AI if Gemini is down |
+## 💡 Overview
 
-## Tech stack
+Most modern personal cloud storage services hold your raw files and their encryption keys side-by-side. If a single provider suffers a breach, misconfiguration, or legal order, your identity documents, contracts, and financial records are exposed.
 
-- **Frontend:** React, Vite, TypeScript, Tailwind CSS v4, Framer Motion, Recharts, lucide icons
-- **Backend:** FastAPI, SQLAlchemy, Pydantic, PostgreSQL + pgvector
-- **Security:** Argon2 password hashing, mandatory TOTP 2FA with one-time recovery codes, revocable sessions (JWT in an httpOnly `__session` cookie), AES-256-GCM envelope encryption, CSRF header check, rate limiting, login lockout, 15-minute auto-lock, password reset by email, security alert emails, file-type checks, security headers
-- **Operations:** admin dashboard with live health checks, startup settings check, friendly user errors with reference codes in the logs
-- **Hosting:** Docker on Cloud Run (backend), Firebase Hosting (frontend)
+**Cubby eliminates single-cloud trust entirely through a distributed zero-knowledge multi-cloud architecture:**
+1. **Azure Key Vault** stores your envelope-encrypted master key (KMS).
+2. **AWS S3** stores your AES-256-GCM encrypted file blobs; **AWS Textract** extracts text from scans.
+3. **Google Cloud** powers AI inference via Gemini (`gemini-3.5-flash`), embeddings (`gemini-embedding-2`), Cloud SQL (`pgvector`), and backend hosting (Cloud Run).
+4. **Groq** serves as a redundant, sub-second failover LLM (`gpt-oss-120b`) if Gemini experiences downtime.
+5. **Local First**: Every cloud dependency can be seamlessly swapped to local-only mode (`KEY_PROVIDER=local`, `STORAGE_PRIMARY=local`, `EMAIL_PROVIDER=console`) for 100% offline development.
 
-## How a document flows
+---
 
-1. You upload a file. The backend encrypts it with your personal data key (AES-256-GCM).
-2. Your data key is itself encrypted ("wrapped") by a master key in Azure Key Vault.
-3. The encrypted file goes to AWS S3, with a backup copy in Azure Blob Storage.
-4. Text is extracted (PyMuPDF for normal PDFs, AWS Textract for scans and photos).
-5. Gemini sorts it onto a shelf, writes a summary and finds important dates.
-6. The text is split into passages, embedded by Gemini, encrypted, and stored in PostgreSQL with pgvector.
-7. Search and chat embed your question, find the closest passages, and answer from them with page citations.
+## 🌟 Key Features
 
-## Project layout
+### 1. Personal Vault & Semantic RAG
+- **Deep Semantic Retrieval**: Ask questions in plain English (*"What is my deductible on our medical insurance?"*). Cubby performs vector similarity search across chunked embeddings.
+- **Precise Page Citations**: Responses feature interactive source pill badges that jump directly to the target page and highlight the exact source passage in an integrated PDF canvas viewer.
+- **Automatic Organization**: Intelligently auto-categorizes uploads into intuitive shelves (Health, Identity, Finance, Property, Taxes, Legal, Education, Vehicle).
+- **OCR Engine**: Automatically routes digital PDFs through PyMuPDF and complex scans/images through AWS Textract.
+- **Duplicate & Revision Detection**: Flags identical uploads and recognizes document updates.
+
+### 2. Family Vaults *(New in v1.3)*
+- **Household Document Chat**: A dedicated collaborative space resembling an encrypted family group chat.
+- **Isolated Cryptographic Isolation**: Each family has its own unique AES-256 data key wrapped in Azure Key Vault. Sharing a document creates a distinct family-encrypted copy—leaving your personal vault completely decoupled.
+- **Masked ID Protection**: Unmasked government IDs are stripped before entering family storage; only masked representations (e.g., `••••234K`) are visible to household members unless explicitly re-saved.
+- **Document Requests**: One-click request cards (e.g., *"Request Birth Certificate from Mom"*). The recipient can fulfill or decline with a single tap.
+- **@Cubby Family Assistant**: Mention `@Cubby` inside the family chat to query across all shared family paperwork without exposing anyone's private personal documents.
+- **Shared Expiry Deadlines**: Reminds every family member at 90, 30, 7, and 1 days before policies, passports, or warranties expire.
+
+### 3. Zero-Knowledge Password Vault
+- **Client-Side Browser Encryption**: Secrets are encrypted and decrypted strictly inside the client's web browser using Web Crypto AES-GCM before transmission.
+- **Zero-Knowledge Architecture**: The server only ever persists encrypted ciphertext; plaintext passwords never touch backend memory or logs.
+- **Password Generator & Health Audit**: Live entropy scoring, breach detection, duplicate analysis, and password strength auditing.
+
+### 4. ID Shield & Checksum Verification
+- **Official Checksum Validation**: Identifies and verifies Passports, Aadhaar, PAN, Voter IDs, and Driving Licences using statutory checksum algorithms (e.g., Verhoeff algorithm).
+- **Sensitive Number Masking**: High-entropy ID numbers are obfuscated by default and require a deliberate password confirmation prompt to reveal.
+- **AI Privacy Shield**: Automatically sanitizes sensitive identity and tax numbers before passing context to LLMs.
+
+### 5. Studio & Automated Reporting
+- **AI Synthesized Reports**: Generate consolidated summaries, timeline overviews, and structured dossiers across multiple documents with verified citations.
+- **Exact Data Tables**: Extracts tabular data, policy coverages, and asset lists into queryable spreadsheets.
+- **Infographic Generator**: Produces a clean, printable vector infographic summarizing vault statistics, asset distributions, and upcoming renewals.
+
+### 6. Enterprise-Grade Security
+- **Mandatory TOTP 2FA**: Required multi-factor authentication with backup single-use emergency recovery codes.
+- **Session Protection**: Revocable JWTs stored in `httpOnly`, `SameSite=Lax`, secure `__session` cookies with automated 15-minute inactivity auto-locks.
+- **CSRF Defense**: Enforces custom `X-Cubby: 1` header checks across all mutating HTTP verbs (`POST`, `PUT`, `PATCH`, `DELETE`).
+- **Cryptographic Password Storage**: Passwords hashed with state-of-the-art Argon2id with unique salts.
+- **Administrative Audit Suite**: Role-based Admin Dashboard featuring live cloud health monitoring, startup verification tests, and traceable incident error codes.
+
+---
+
+## ☁️ Multi-Cloud Architecture
+
+### Division of Responsibilities
+
+| Cloud / Service | Technologies & APIs | Role in Cubby |
+| :--- | :--- | :--- |
+| **AWS** | S3, Textract | Primary encrypted document storage, asynchronous OCR for complex scans & imagery |
+| **Azure** | Key Vault, Blob Storage, Communication Services | Master Key KMS envelope wrapping, geo-redundant encrypted backup replica, transactional emails & alerts |
+| **Google Cloud** | Cloud Run, Cloud SQL (`pgvector`), Gemini API | Backend container runtime, vector database, Gemini 3.5 Flash semantic Q&A, Gemini Embedding 2 |
+| **Groq** | `openai/gpt-oss-120b` | High-speed, low-latency failover LLM triggered automatically if Gemini quotas or outages occur |
+| **Firebase** | Firebase Hosting | Global CDN hosting for the compiled React SPA |
+
+### Cryptographic Envelope Encryption Flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as User Browser
+    participant API as FastAPI Backend
+    participant KMS as Azure Key Vault
+    participant S3 as AWS S3 (Primary)
+    participant Blob as Azure Blob (Backup)
+    participant DB as Cloud SQL (PostgreSQL + pgvector)
+    participant AI as Gemini 3.5 Flash
+
+    User->>API: 1. Upload Document File
+    API->>KMS: 2. Request Master Key Wrap / Generate DEK
+    KMS-->>API: 3. Return Encrypted Data Encryption Key (EDEK)
+    API->>API: 4. Encrypt File Bytes with DEK (AES-256-GCM)
+    par Distributed Storage
+        API->>S3: 5a. Store Encrypted File
+        API->>Blob: 5b. Store Backup Encrypted File
+    end
+    API->>API: 6. Extract Text & Chunk (PyMuPDF / Textract)
+    API->>AI: 7. Mask Sensitive IDs & Embed Passages
+    AI-->>API: 8. Return Vector Embeddings & Shelf Classification
+    API->>API: 9. Encrypt Passage Text with DEK
+    API->>DB: 10. Persist Encrypted Passages + Embeddings + EDEK
+    API-->>User: 11. Upload Complete (Zero Unencrypted At-Rest Footprint)
+```
+
+---
+
+## 🛠️ Tech Stack
+
+### Frontend
+- **Framework**: [React 18](https://react.dev/) + [Vite 6](https://vitejs.dev/) + [TypeScript](https://www.typescriptlang.org/)
+- **Styling**: [Tailwind CSS v4](https://tailwindcss.com/)
+- **Animations**: [Framer Motion](https://www.framer.com/motion/)
+- **Visualizations**: [Recharts](https://recharts.org/)
+- **Icons**: [Lucide React](https://lucide.dev/)
+- **Document Viewing**: [PDF.js (`pdfjs-dist`)](https://mozilla.github.io/pdf.js/)
+- **Markdown & Math**: `react-markdown`, `remark-gfm`
+
+### Backend
+- **Core API**: [FastAPI 0.115+](https://fastapi.tiangolo.com/) with asynchronous lifespan handlers
+- **ORM & Database**: [SQLAlchemy 2.0](https://www.sqlalchemy.org/) + [PostgreSQL 16](https://www.postgresql.org/) with [`pgvector`](https://github.com/pgvector/pgvector)
+- **Database Driver**: `psycopg` (v3 binary)
+- **Data Validation & Settings**: `pydantic-settings`
+- **Cryptography & Security**: `cryptography` (AES-256-GCM), `argon2-cffi`, `pyjwt`, `pyotp` (TOTP 2FA)
+- **Document Ingestion**: `PyMuPDF` (fitz)
+- **Multi-Cloud SDKs**: `boto3`, `azure-keyvault-keys`, `azure-storage-blob`, `azure-communication-email`, `google-genai`
+
+---
+
+## 📂 Repository Structure
 
 ```
 cubby/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py            # FastAPI app, CSRF guard, routers
-│   │   ├── config.py          # every setting, read from .env
-│   │   ├── models.py          # database tables
-│   │   ├── security.py        # passwords, sessions, 2FA
-│   │   ├── core/              # errors, rate limits, startup checks
-│   │   ├── providers/         # swappable cloud services (+ email.py)
-│   │   │   ├── keys.py        #   local key / Azure Key Vault
-│   │   │   ├── storage.py     #   local / S3 / Azure Blob
-│   │   │   ├── ocr.py         #   AWS Textract
-│   │   │   └── llm.py         #   Gemini / Groq (+ automatic fallback)
-│   │   ├── services/          # encryption, extraction, RAG, reminders, ID cards, privacy shield
-│   │   └── modules/           # API routes, one file per feature
-│   ├── scripts/make_secrets.py
-│   ├── Dockerfile
-│   ├── .env.example
-│   └── env.prod.example.yaml
+│   │   ├── main.py              # FastAPI initialization, CORS, CSRF guard, router mounting
+│   │   ├── config.py            # Strictly-typed Pydantic settings loaded from .env
+│   │   ├── database.py          # PostgreSQL session factory and schema initialization
+│   │   ├── models.py            # SQLAlchemy models (Users, Documents, Passages, Vault, Family)
+│   │   ├── security.py          # Argon2 hashing, TOTP secrets, session cookie management
+│   │   ├── core/
+│   │   │   ├── checks.py        # Startup health and environment validation
+│   │   │   ├── errors.py        # Standardized API error responses with audit codes
+│   │   │   └── rate_limit.py    # Sliding window IP and account rate limiters
+│   │   ├── providers/           # Interchangeable multi-cloud abstractions
+│   │   │   ├── keys.py          # Local fallback key generator / Azure Key Vault KMS
+│   │   │   ├── storage.py       # Local filesystem / AWS S3 / Azure Blob Storage
+│   │   │   ├── ocr.py           # PyMuPDF / AWS Textract pipeline
+│   │   │   ├── llm.py           # Gemini 3.5 Flash + Groq fallback LLM handler
+│   │   │   └── email.py         # Console logger / Azure Communication Services
+│   │   ├── services/            # Domain logic: RAG, ID masking, reminders, encryption
+│   │   └── modules/             # Modular API route controllers
+│   │       ├── auth.py          # Login, signup, 2FA enrollment, password recovery
+│   │       ├── documents.py     # Upload, download, delete, reprocess, metadata
+│   │       ├── family.py        # Household vaults, member permissions, document sharing
+│   │       ├── search.py        # Hybrid vector + lexical semantic retrieval
+│   │       ├── chat.py          # Streaming Q&A with citation links
+│   │       ├── vault.py         # Zero-knowledge encrypted password vault
+│   │       ├── studio.py        # Dossier compiler, summary tables, infographics
+│   │       ├── shares.py        # Time-gated, revocable public viewer URLs
+│   │       ├── insights.py      # Automated expiry alerts and scheduled pulse checks
+│   │       ├── admin.py         # Administrative telemetry and system status
+│   │       └── internal.py      # Authenticated Cron and Cloud Scheduler endpoints
+│   ├── scripts/
+│   │   └── make_secrets.py      # Cryptographic utility to generate secure app secrets
+│   ├── Dockerfile               # Production container image definition
+│   ├── requirements.txt         # Pinned Python package dependencies
+│   ├── .env.example             # Documented local environment variable template
+│   └── env.prod.example.yaml    # Google Cloud Run production environment manifest
 ├── frontend/
 │   ├── src/
-│   │   ├── pages/             # one file per screen
-│   │   ├── components/        # Mascot, layout, shared UI
-│   │   └── lib/               # API client, auth, formatting
-│   └── firebase.json
-├── docker-compose.yml         # local PostgreSQL + pgvector
-└── docs/SETUP_GUIDE.md
+│   │   ├── pages/               # Application views (Overview, Family, Vault, Studio, etc.)
+│   │   ├── components/          # Reusable UI widgets, PDF viewer, Mascot, Layout
+│   │   └── lib/                 # Zero-knowledge crypto, API fetch client, date helpers
+│   ├── package.json             # NPM dependencies and scripts
+│   ├── vite.config.ts           # Vite bundler configuration
+│   └── firebase.json            # Firebase Hosting configuration
+├── docker-compose.yml           # Local orchestration for PostgreSQL + pgvector and API
+└── docs/
+    ├── SETUP_GUIDE.md           # Exhaustive step-by-step tutorial (Parts 0 through 8)
+    ├── UPGRADE_v1.1.md          # Migration notes for v1.1
+    ├── UPGRADE_v1.2.md          # Migration notes for v1.2
+    └── UPGRADE_v1.3.md          # Migration notes for v1.3 (Family Vaults)
 ```
 
-## Quick start (after Part 0 of the guide)
+---
+
+## 🚀 Quick Start (Local Development)
+
+You can run Cubby 100% locally on your workstation without configuring any cloud accounts.
+
+### Prerequisites
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (running)
+- [Node.js 22 LTS](https://nodejs.org/)
+- [Python 3.12+](https://www.python.org/downloads/) (with `pip`)
+
+### 1. Clone & Configure
+
+Generate an application secret and prepare your environment:
 
 ```bash
-docker compose up -d --build               # database + backend (in Docker)
-# backend/.env must exist first: copy .env.example and fill it in (guide, Part 1)
-
-# new terminal
-cd frontend && npm install && npm run dev  # open http://localhost:5173
+# In the backend directory
+cd backend
+python scripts/make_secrets.py
 ```
 
-## Adding features later
+Copy the example environment configuration:
+```bash
+cp .env.example .env
+```
 
-- **New AI provider:** add a class with `generate()` in `providers/llm.py` and register it in `_CHAT`.
-- **New storage or key service:** add a class with the same methods in `providers/storage.py` or `providers/keys.py`.
-- **New feature (password vault, Studio…):** add a router in `backend/app/modules/` and a page in `frontend/src/pages/`.
-- **Schema changes:** v1 creates tables automatically. Before changing existing tables, add Alembic migrations.
+Open `backend/.env` and paste your generated secret into `APP_SECRET` and `LOCAL_MASTER_KEY`:
+```ini
+APP_ENV=local
+APP_SECRET=your_generated_app_secret
+KEY_PROVIDER=local
+LOCAL_MASTER_KEY=your_generated_master_key
+STORAGE_PRIMARY=local
+EMAIL_PROVIDER=console
+OCR_PROVIDER=none
+LLM_PROVIDER=gemini       # Set GCP_PROJECT_ID or switch to local testing
+```
 
-## Known v1 limits
+### 2. Start Database & Backend
 
-- Rate limits are counted per server instance, not globally.
-- Embedding vectors and file names are stored unencrypted (passage text, summaries and chats are encrypted).
-- Text is decrypted in server memory while it's being processed or answered.
-- Changing `GEMINI_EMBED_MODEL` after uploading means pressing **Reprocess** on each document.
+Run Docker Compose from the root project directory:
+
+```bash
+# From the project root
+docker compose up -d --build
+```
+
+Verify backend health by inspecting the container logs:
+```bash
+docker compose logs -f backend
+# Wait for: "Application startup complete."
+```
+
+### 3. Start Frontend
+
+In a separate terminal window:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Visit [http://localhost:5173](http://localhost:5173) in your browser:
+1. Create an account.
+2. Scan the displayed QR code with your mobile authenticator app (Google Authenticator, Authy, etc.).
+3. Save your one-time recovery codes and access your encrypted vault!
+
+---
+
+## ⚙️ Configuration Reference (.env)
+
+| Environment Variable | Allowed Values | Description |
+| :--- | :--- | :--- |
+| `APP_ENV` | `local`, `production` | Switches security policies, API doc exposure, and CSRF strictness |
+| `APP_SECRET` | 64+ char random string | Secret key used for signing session JWT tokens |
+| `FRONTEND_ORIGIN` | URL (e.g. `http://localhost:5173`) | CORS allowed origin header |
+| `COOKIE_SECURE` | `false` (local), `true` (prod) | Sets the `Secure` flag on the `__session` cookie |
+| `CRON_SECRET` | Secret token | Authorizes calls to `/api/internal/pulse` (daily expiry checker) |
+| `ADMIN_EMAILS` | Comma-separated emails | Grants elevated access to `/admin` diagnostic dashboard |
+| `KEY_PROVIDER` | `local`, `azure` | Source for KMS master key encryption |
+| `STORAGE_PRIMARY` | `local`, `s3` | Destination for document ciphertext storage |
+| `STORAGE_BACKUP` | `none`, `azure` | Secondary geo-backup storage provider |
+| `OCR_PROVIDER` | `none`, `textract` | Document OCR parsing engine |
+| `LLM_PROVIDER` | `gemini`, `groq` | Primary RAG and categorization engine |
+| `LLM_FALLBACK` | `true`, `false` | Automatically routes to Groq if Gemini returns errors |
+| `EMAIL_PROVIDER` | `console`, `acs` | System email delivery service (console logs vs Azure) |
+
+For cloud-connected credentials (`AWS_ACCESS_KEY_ID`, `AZURE_KEY_VAULT_URL`, `GCP_PROJECT_ID`), follow [`docs/SETUP_GUIDE.md`](docs/SETUP_GUIDE.md).
+
+---
+
+## 🌐 Production Deployment
+
+Cubby is designed for modern serverless container hosting:
+
+```mermaid
+flowchart LR
+    Browser["User Browser"] --> Firebase["Firebase Hosting (Frontend CDN)"]
+    Browser --> CloudRun["Google Cloud Run (Cubby API)"]
+    CloudRun --> CloudSQL[("Google Cloud SQL (pgvector)")]
+    CloudRun --> S3[("AWS S3 (Encrypted Files)")]
+    CloudRun --> AzureKV["Azure Key Vault (Master KMS)"]
+    CloudRun --> AzureBlob[("Azure Blob (Backup Files)")]
+    CloudRun --> Gemini["Google Gemini 3.5 Flash"]
+    Scheduler["Cloud Scheduler"] -->|Daily Pulse| CloudRun
+```
+
+1. **Deploy Backend to Google Cloud Run**:
+   ```bash
+   gcloud run deploy cubby-api \
+     --source ./backend \
+     --region asia-south1 \
+     --allow-unauthenticated \
+     --add-cloudsql-instances YOUR_PROJECT:REGION:INSTANCE \
+     --env-vars-file ./backend/env.prod.yaml \
+     --no-cpu-throttling \
+     --memory 1Gi \
+     --max-instances 3
+   ```
+2. **Deploy Frontend to Firebase Hosting**:
+   ```bash
+   cd frontend
+   npm run build
+   firebase deploy --only hosting
+   ```
+3. **Configure Daily Expiry Pulse**:
+   Create a Google Cloud Scheduler job calling `https://api.yourdomain.com/api/internal/pulse` with the header `X-Cron-Secret: YOUR_CRON_SECRET` once daily.
+
+Detailed step-by-step instructions for production deployment are detailed in [Part 6 of `docs/SETUP_GUIDE.md`](docs/SETUP_GUIDE.md).
+
+---
+
+## 🔄 Upgrade Guide
+
+- **Upgrading to v1.3 (Family Vaults)**: Follow [`docs/UPGRADE_v1.3.md`](docs/UPGRADE_v1.3.md). The backend will automatically apply non-destructive schema updates creating seven new family tables.
+- **Upgrading from v1.1 to v1.2**: Follow [`docs/UPGRADE_v1.2.md`](docs/UPGRADE_v1.2.md).
+- **Upgrading from v1.0 to v1.1**: Follow [`docs/UPGRADE_v1.1.md`](docs/UPGRADE_v1.1.md).
+
+---
+
+## 🔒 Known Limitations & Roadmap
+
+- **Instance-Level Rate Limits**: In-memory rate limiters operate on a per-container basis rather than through a shared Redis cluster.
+- **Metadata Protection**: Document titles, tags, and raw embedding vectors are stored unencrypted in PostgreSQL for index efficiency; passage contents, notes, summaries, and chat transcripts are fully encrypted.
+- **Transient Memory Decryption**: Document ciphertext is temporarily decrypted in server RAM during real-time RAG context synthesis.
+- **Embedding Model Migrations**: Modifying `GEMINI_EMBED_MODEL` requires re-indexing existing documents using the in-app **Reprocess** tool.
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
